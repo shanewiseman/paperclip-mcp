@@ -26,7 +26,7 @@ from paperclip_mcp import __version__
 from paperclip_mcp.client import PaperclipClient
 from paperclip_mcp.config import Settings
 from paperclip_mcp.errors import OpenAPIContractError, UpstreamError
-from paperclip_mcp.openapi import OperationRegistry, response_envelope_schema
+from paperclip_mcp.openapi import Operation, OperationRegistry, response_envelope_schema
 
 LIST_OPERATIONS_TOOL = "paperclip_list_operations"
 CALL_OPERATION_TOOL = "paperclip_call_operation"
@@ -38,6 +38,7 @@ class Runtime:
 
     settings: Settings
     registry: OperationRegistry
+    health_operation: Operation
     client: PaperclipClient
     server: Server[Any]
 
@@ -48,13 +49,24 @@ class Runtime:
         *,
         client: PaperclipClient | None = None,
     ) -> Runtime:
-        registry = OperationRegistry.load(
-            settings.openapi_path,
-            enabled_tags=settings.enabled_tag_set,
+        complete_registry = OperationRegistry.load(settings.openapi_path)
+        registry = (
+            complete_registry
+            if settings.enabled_tag_set is None
+            else OperationRegistry(
+                complete_registry.document,
+                enabled_tags=settings.enabled_tag_set,
+            )
         )
         upstream = client or PaperclipClient(settings)
         protocol = _create_protocol_server(registry, upstream)
-        return cls(settings=settings, registry=registry, client=upstream, server=protocol)
+        return cls(
+            settings=settings,
+            registry=registry,
+            health_operation=complete_registry.operation("GET /api/health"),
+            client=upstream,
+            server=protocol,
+        )
 
 
 class StreamableHTTPApp:
@@ -141,6 +153,7 @@ def _create_protocol_server(
             _validate_operation_arguments(operation.input_schema, operation_arguments)
             return await client.execute(operation, operation_arguments)
         operation = registry.operation(name)
+        _validate_operation_arguments(operation.input_schema, arguments)
         return await client.execute(operation, arguments)
 
     @server.list_resources()  # type: ignore[no-untyped-call,untyped-decorator]
@@ -244,7 +257,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.get("/readyz", tags=["operations"])
     async def ready(response: Response) -> dict[str, Any]:
         try:
-            result = await runtime.client.execute(runtime.registry.operation("GET /api/health"))
+            result = await runtime.client.execute(runtime.health_operation)
         except UpstreamError as exc:
             response.status_code = 503
             return {

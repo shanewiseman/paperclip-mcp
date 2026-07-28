@@ -66,6 +66,39 @@ async def test_health_and_readiness_work_with_upstream_local_mode(
 
 
 @pytest.mark.asyncio
+async def test_readiness_retains_health_operation_when_tools_are_tag_filtered(
+    registry: OperationRegistry,
+    settings_factory: Callable[..., Any],
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    runtime, upstream = _runtime(
+        registry,
+        settings_factory(enabled_tags="issues"),
+        handler,
+    )
+    assert {operation.tag for operation in runtime.registry.operations} == {"issues"}
+
+    app = create_app(runtime)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://127.0.0.1",
+        ) as client,
+    ):
+        ready = await client.get("/readyz")
+    await upstream.aclose()
+
+    assert ready.status_code == 200
+    assert seen[0].url.path == "/api/health"
+
+
+@pytest.mark.asyncio
 async def test_http_mcp_rejects_missing_or_wrong_bearer(
     registry: OperationRegistry,
     settings_factory: Callable[..., Any],
@@ -233,6 +266,26 @@ async def test_protocol_handlers_list_call_and_read_resources(
     )
     assert generic.root.isError is False
     assert direct.root.isError is False
+    invalid_direct = await call_handler(
+        types.CallToolRequest(
+            params=types.CallToolRequestParams(
+                name="pc_get_health",
+                arguments={"multipart": {}},
+            )
+        )
+    )
+    missing_required = await call_handler(
+        types.CallToolRequest(
+            params=types.CallToolRequestParams(
+                name=runtime.registry.operation("POST /api/companies/{companyId}/issues").tool_name,
+                arguments={},
+            )
+        )
+    )
+    assert invalid_direct.root.isError is True
+    assert missing_required.root.isError is True
+    assert "Input validation error" in invalid_direct.root.content[0].text
+    assert "Input validation error" in missing_required.root.content[0].text
 
     resources_handler = runtime.server.request_handlers[types.ListResourcesRequest]
     resources = await resources_handler(types.ListResourcesRequest())
