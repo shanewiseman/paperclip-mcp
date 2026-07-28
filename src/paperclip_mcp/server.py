@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,6 +31,7 @@ from paperclip_mcp.openapi import Operation, OperationRegistry, response_envelop
 
 LIST_OPERATIONS_TOOL = "paperclip_list_operations"
 CALL_OPERATION_TOOL = "paperclip_call_operation"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -259,11 +261,12 @@ def create_app(runtime: Runtime) -> FastAPI:
         try:
             result = await runtime.client.execute(runtime.health_operation)
         except UpstreamError as exc:
+            LOGGER.warning("Paperclip readiness probe failed: %s", exc)
             response.status_code = 503
             return {
                 "status": "not-ready",
                 "paperclip": False,
-                "detail": str(exc),
+                "detail": "Paperclip readiness probe failed",
             }
         response.status_code = 200
         return {

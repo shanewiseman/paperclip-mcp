@@ -99,6 +99,39 @@ async def test_readiness_retains_health_operation_when_tools_are_tag_filtered(
 
 
 @pytest.mark.asyncio
+async def test_readiness_does_not_expose_upstream_error_details(
+    registry: OperationRegistry,
+    settings_factory: Callable[..., Any],
+) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            502,
+            json={"access_token": "readiness-secret", "detail": "proxy failure"},
+        )
+
+    runtime, upstream = _runtime(registry, settings_factory(), handler)
+    app = create_app(runtime)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://127.0.0.1",
+        ) as client,
+    ):
+        ready = await client.get("/readyz")
+    await upstream.aclose()
+
+    assert ready.status_code == 503
+    assert ready.json() == {
+        "status": "not-ready",
+        "paperclip": False,
+        "detail": "Paperclip readiness probe failed",
+    }
+    assert "readiness-secret" not in ready.text
+    assert "proxy failure" not in ready.text
+
+
+@pytest.mark.asyncio
 async def test_http_mcp_rejects_missing_or_wrong_bearer(
     registry: OperationRegistry,
     settings_factory: Callable[..., Any],
