@@ -161,6 +161,7 @@ async def test_upstream_errors_redact_credentials_and_are_bounded(
 async def test_response_and_multipart_size_limits(
     registry: OperationRegistry,
     settings_factory: Callable[..., Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"x" * 1025)
@@ -170,6 +171,11 @@ async def test_response_and_multipart_size_limits(
         client = PaperclipClient(settings, http_client=http_client)
         with pytest.raises(UpstreamError, match="exceeds configured maximum"):
             await client.execute(registry.operation("GET /api/health"))
+
+        def unexpected_decode(*_: Any, **__: Any) -> bytes:
+            raise AssertionError("oversized base64 was decoded")
+
+        monkeypatch.setattr(base64, "b64decode", unexpected_decode)
         with pytest.raises(OpenAPIContractError, match="request maximum"):
             await client.execute(
                 registry.operation("POST /api/companies/{companyId}/assets/images"),
@@ -183,6 +189,46 @@ async def test_response_and_multipart_size_limits(
                     },
                 },
             )
+
+
+@pytest.mark.asyncio
+async def test_multipart_limit_counts_text_and_file_metadata(
+    registry: OperationRegistry,
+    settings_factory: Callable[..., Any],
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"id": "asset-1"})
+
+    settings = settings_factory(max_request_bytes=1024)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = PaperclipClient(settings, http_client=http_client)
+        operation = registry.operation("POST /api/companies/{companyId}/assets/images")
+        with pytest.raises(OpenAPIContractError, match="request maximum"):
+            await client.execute(
+                operation,
+                {
+                    "path": {"companyId": "company-1"},
+                    "multipart": {"purpose": "x" * 1024},
+                },
+            )
+        with pytest.raises(OpenAPIContractError, match="request maximum"):
+            await client.execute(
+                operation,
+                {
+                    "path": {"companyId": "company-1"},
+                    "multipart": {
+                        "file": {
+                            "filename": "x" * 1024,
+                            "data_base64": "eA==",
+                        }
+                    },
+                },
+            )
+
+    assert requests == []
 
 
 @pytest.mark.asyncio
