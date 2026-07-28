@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "paperclip-mcp"
+version = "0.1.0"
+description = "Schema-driven Model Context Protocol gateway for the Paperclip API"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Paperclip MCP contributors" }]
+keywords = ["paperclip", "mcp", "automation", "agents"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Framework :: FastAPI",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "fastapi>=0.116,<0.117",
+  "httpx>=0.28,<1",
+  "jsonschema>=4.25,<5",
+  "mcp==1.28.1,<2",
+  "pydantic-settings>=2.10,<3",
+  "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2,<2",
+  "mypy>=1.16,<2",
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.0,<2",
+  "pytest-cov>=6.2,<7",
+  "ruff==0.16.0",
+  "types-jsonschema>=4.25,<5",
+  "uv==0.8.15",
+]
+
+[project.scripts]
+paperclip-mcp = "paperclip_mcp.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/paperclip_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"paperclip-openapi.json" = "paperclip_mcp/paperclip-openapi.json"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/README.md",
+  "/paperclip-openapi.json",
+  "/pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["paperclip_mcp"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["A", "ASYNC", "B", "C4", "E", "F", "I", "N", "PERF", "PIE", "RUF", "S", "SIM", "UP"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S104", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["paperclip_mcp"]
+warn_unreachable = true

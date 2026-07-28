@@ -1,0 +1,16 @@
+.git
+.github
+.jenkins
+.ci-cache
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv
+artifacts
+dist
+secrets
+*.egg-info
+*.py[cod]
+.coverage*
+.env
+Jenkinsfile
