@@ -186,7 +186,21 @@ class PaperclipClient:
         values = _mapping_or_empty(raw, "multipart")
         parts: list[tuple[str, Any]] = []
         total_bytes = 0
+
+        def reserve(size: int) -> None:
+            nonlocal total_bytes
+            if size > self.settings.max_request_bytes - total_bytes:
+                raise OpenAPIContractError("multipart payload exceeds configured request maximum")
+            total_bytes += size
+
+        def reserve_text(value: str) -> None:
+            remaining = self.settings.max_request_bytes - total_bytes
+            if len(value) > remaining:
+                raise OpenAPIContractError("multipart payload exceeds configured request maximum")
+            reserve(len(value.encode("utf-8")))
+
         for name, value in values.items():
+            reserve_text(name)
             if isinstance(value, Mapping):
                 filename = value.get("filename")
                 media_type = value.get("media_type", "application/octet-stream")
@@ -197,22 +211,32 @@ class PaperclipClient:
                     raise OpenAPIContractError(f"multipart field {name!r} has invalid media_type")
                 if not isinstance(encoded, str):
                     raise OpenAPIContractError(f"multipart field {name!r} needs data_base64")
+                reserve_text(filename)
+                reserve_text(media_type)
+                remaining = self.settings.max_request_bytes - total_bytes
+                max_encoded_length = 4 * ((remaining + 2) // 3)
+                if len(encoded) > max_encoded_length:
+                    raise OpenAPIContractError(
+                        "multipart payload exceeds configured request maximum"
+                    )
                 try:
                     data = base64.b64decode(encoded, validate=True)
                 except (ValueError, binascii.Error) as exc:
                     raise OpenAPIContractError(
                         f"multipart field {name!r} contains invalid base64"
                     ) from exc
-                total_bytes += len(data)
+                reserve(len(data))
                 parts.append((name, (filename, data, media_type)))
             elif isinstance(value, bool):
-                parts.append((name, (None, "true" if value else "false")))
+                text = "true" if value else "false"
+                reserve_text(text)
+                parts.append((name, (None, text)))
             elif isinstance(value, (str, int, float)):
-                parts.append((name, (None, str(value))))
+                text = str(value)
+                reserve_text(text)
+                parts.append((name, (None, text)))
             else:
                 raise OpenAPIContractError(f"multipart field {name!r} has unsupported value")
-        if total_bytes > self.settings.max_request_bytes:
-            raise OpenAPIContractError("multipart payload exceeds configured request maximum")
         return parts
 
 
