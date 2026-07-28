@@ -1,0 +1,14 @@
+services:
+  paperclip-mcp:
+    environment:
+      PAPERCLIP_API_TOKEN_FILE: /run/secrets/paperclip_api_token
+    secrets:
+      - source: paperclip_api_token
+        target: paperclip_api_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+
+secrets:
+  paperclip_api_token:
+    file: "${PAPERCLIP_API_TOKEN_FILE:-./secrets/paperclip_api_token}"

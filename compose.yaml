@@ -1,0 +1,47 @@
+name: paperclip-mcp
+
+services:
+  paperclip-mcp:
+    image: paperclip-mcp:local
+    build:
+      context: .
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001
+    ports:
+      - "127.0.0.1:${PAPERCLIP_MCP_PORT:-8000}:8000"
+    environment:
+      PAPERCLIP_BASE_URL: "${PAPERCLIP_BASE_URL:-http://host.docker.internal:3100}"
+      PAPERCLIP_MCP_BIND_HOST: 0.0.0.0
+      PAPERCLIP_MCP_BIND_PORT: 8000
+      PAPERCLIP_MCP_TOKEN_FILE: /run/secrets/paperclip_mcp_token
+      PAPERCLIP_MCP_LOG_LEVEL: "${PAPERCLIP_MCP_LOG_LEVEL:-INFO}"
+    secrets:
+      - source: paperclip_mcp_token
+        target: paperclip_mcp_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+secrets:
+  paperclip_mcp_token:
+    file: "${PAPERCLIP_MCP_TOKEN_FILE:-./secrets/mcp_token}"
