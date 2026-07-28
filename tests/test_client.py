@@ -10,6 +10,7 @@ import pytest
 
 from paperclip_mcp.client import (
     PaperclipClient,
+    _safe_error_excerpt,
     _serialize_path_value,
     _serialize_query_value,
 )
@@ -155,6 +156,46 @@ async def test_upstream_errors_redact_credentials_and_are_bounded(
     assert "upstream-secret" not in str(raised.value)
     assert "also-secret" not in str(raised.value)
     assert "[REDACTED]" in str(raised.value)
+
+
+def test_error_excerpt_redacts_compound_json_and_text_credentials() -> None:
+    structured = json.dumps(
+        {
+            "access_token": "access-secret",
+            "nested": {
+                "refreshToken": "refresh-secret",
+                "client-secret": "client-secret-value",
+                "apiKey": "api-secret",
+                "private_key": "private-secret",
+                "safe": "visible",
+            },
+            "message": "configured-token",
+        }
+    ).encode()
+
+    json_excerpt = _safe_error_excerpt(structured, "configured-token")
+    text_excerpt = _safe_error_excerpt(
+        (b"access_token=plain-access clientSecret:'plain-client' apiKey=plain-api safe=value"),
+        None,
+    )
+
+    for secret in {
+        "access-secret",
+        "refresh-secret",
+        "client-secret-value",
+        "api-secret",
+        "private-secret",
+        "configured-token",
+        "plain-access",
+        "plain-client",
+        "plain-api",
+    }:
+        assert secret not in json_excerpt
+        assert secret not in text_excerpt
+    assert '"safe":"visible"' in json_excerpt
+    assert "safe=value" in text_excerpt
+    assert json_excerpt.count("[REDACTED]") == 6
+    assert text_excerpt.count("[REDACTED]") == 3
 
 
 @pytest.mark.asyncio

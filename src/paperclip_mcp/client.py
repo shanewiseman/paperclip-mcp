@@ -7,6 +7,7 @@ import binascii
 import json
 import re
 from collections.abc import Mapping
+from itertools import pairwise
 from typing import Any
 from urllib.parse import quote
 
@@ -29,8 +30,25 @@ SAFE_RESPONSE_HEADERS = frozenset(
     }
 )
 SENSITIVE_FIELD = re.compile(
-    r'(?i)(["\']?(?:authorization|password|secret|token|api[_-]?key)["\']?\s*[:=]\s*)'
+    r'(?i)(["\']?[a-z0-9_-]*'
+    r"(?:authorization|password|passwd|secret|token|credential|api[_-]?key|private[_-]?key)"
+    r'[a-z0-9_-]*["\']?\s*[:=]\s*)'
     r'(["\'][^"\']*["\']|[^\s,;}]+)'
+)
+CAMEL_CASE_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+SENSITIVE_KEY_PARTS = frozenset(
+    {"authorization", "credential", "credentials", "password", "passwd", "secret", "token"}
+)
+SENSITIVE_KEY_SUFFIXES = (
+    "authorization",
+    "credential",
+    "credentials",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "apikey",
+    "privatekey",
 )
 
 
@@ -321,6 +339,46 @@ def _safe_error_excerpt(payload: bytes, token: str | None) -> str:
     if not payload:
         return ""
     excerpt = payload[:2048].decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(excerpt)
+    except json.JSONDecodeError:
+        parsed = None
+    if parsed is not None:
+        excerpt = json.dumps(
+            _redact_json_credentials(parsed, token),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )[:2048]
+        token = None
     if token:
         excerpt = excerpt.replace(token, "[REDACTED]")
     return SENSITIVE_FIELD.sub(r"\1[REDACTED]", excerpt).strip()
+
+
+def _redact_json_credentials(value: Any, token: str | None) -> Any:
+    if isinstance(value, Mapping):
+        redacted: dict[str, Any] = {}
+        for raw_key, item in value.items():
+            key = str(raw_key)
+            safe_key = key.replace(token, "[REDACTED]") if token else key
+            redacted[safe_key] = (
+                "[REDACTED]" if _is_sensitive_key(key) else _redact_json_credentials(item, token)
+            )
+        return redacted
+    if isinstance(value, list):
+        return [_redact_json_credentials(item, token) for item in value]
+    if isinstance(value, str) and token:
+        return value.replace(token, "[REDACTED]")
+    return value
+
+
+def _is_sensitive_key(key: str) -> bool:
+    separated = CAMEL_CASE_BOUNDARY.sub("_", key)
+    parts = [part for part in re.split(r"[^a-z0-9]+", separated.casefold()) if part]
+    if any(part in SENSITIVE_KEY_PARTS for part in parts):
+        return True
+    normalized = "".join(parts)
+    if normalized.endswith(SENSITIVE_KEY_SUFFIXES):
+        return True
+    pairs = set(pairwise(parts))
+    return ("api", "key") in pairs or ("private", "key") in pairs
