@@ -47,3 +47,5 @@ review:
   maxDiffBytes: 200000
   excludedPaths:
     - paperclip-openapi.json
+    - docs/generated/mcp-tools.md
+    - uv.lock
