@@ -1,0 +1,49 @@
+apiVersion: ci.jenkinsservice.dev/v1
+runtime:
+  image: python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
+  timeoutMinutes: 10
+  cpu: 1
+  memory: 512Mi
+  pids: 128
+  network: none
+  environment:
+    PYTHONDONTWRITEBYTECODE: "1"
+steps:
+  standards:
+    - id: pipeline-files
+      name: Jenkins integration files
+      command:
+        - sh
+        - -ec
+        - >-
+          test -s Jenkinsfile &&
+          test -s .jenkins/pipeline.yaml &&
+          test -s paperclip-openapi.json &&
+          grep -q 'shanewiseman/paperclip-mcp' Jenkinsfile &&
+          grep -q 'ci.jenkinsservice.dev/v1' .jenkins/pipeline.yaml
+  tests:
+    - id: openapi-smoke
+      name: OpenAPI document smoke test
+      command:
+        - python
+        - -c
+        - >-
+          import json, pathlib;
+          document = json.loads(pathlib.Path("paperclip-openapi.json").read_text(encoding="utf-8"));
+          assert document.get("openapi") == "3.0.0";
+          assert document.get("info", {}).get("title") == "Paperclip API";
+          assert isinstance(document.get("paths"), dict) and document["paths"]
+  custom: []
+security:
+  gitleaks: true
+  trivy: true
+artifacts: []
+extensions: []
+review:
+  enabled: true
+  pullRequestsOnly: true
+  criticalSeverities:
+    - critical
+  maxDiffBytes: 200000
+  excludedPaths:
+    - paperclip-openapi.json
